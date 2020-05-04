@@ -31,16 +31,16 @@ import cv2
 from PIL import Image
 
 # %matplotlib inline
-is_ipython = 'inline' in matplotlib.get_backend()
-if is_ipython:
-    from IPython import display
+# is_ipython = 'inline' in matplotlib.get_backend()
+# if is_ipython:
+#     from IPython import display
 
 # %load_ext autoreload
 # %autoreload 2
 
-!pip install wandb
+# !pip install wandb
 
-import wandb
+# import wandb
 
 class Preprocess(gym.ObservationWrapper):
     def __init__(self, env):
@@ -115,22 +115,22 @@ def make_env(env_name):
 # Sample some frames to check preprocessing
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-env = make_env("PongDeterministic-v4")
-observation = env.reset()
+# env = make_env("PongDeterministic-v4")
+# observation = env.reset()
 
-for i in range(55):
-    if i > 50:
-        plt.imshow(observation.cpu().squeeze(0).permute(1, 2, 0).numpy()[:,:,1],cmap="gray")  # interpolation='none')
-        plt.show()
+# for i in range(55):
+#     if i > 50:
+#         plt.imshow(observation.cpu().squeeze(0).permute(1, 2, 0).numpy()[:,:,1],cmap="gray")  # interpolation='none')
+#         plt.show()
 
-    observation, _, _, _ = env.step(random.randrange(6))
+#     observation, _, _, _ = env.step(random.randrange(6))
 
-print("Input shape: ", env.observation_space.shape)
-print("Action space size: ", env.action_space.n)
-print("Actions: ", env.get_action_meanings())
+# print("Input shape: ", env.observation_space.shape)
+# print("Action space size: ", env.action_space.n)
+# print("Actions: ", env.get_action_meanings())
 
 # Check dimensions of observation are in correct order (batch size, channels (stack of 4 1 channel frames), height, width)
-print(observation.shape)
+# print(observation.shape)
 
 # Create replay memory object to store a set number of transitions to sample from at each step
 Transition = namedtuple(
@@ -337,10 +337,10 @@ num_eps = 400
 steps_before_train = 10 # don't start training right from beginning of epoch
 
 # Config for wandb
-wandb.init(project="reinforcement-learning-coursework", name="dqn-pong",
-           config={"batch size":batch_size, "learning_rate": learning_rate, "eps_min": eps_min,
-                   "eps_decay": eps_decay,"capacity": capacity,
-                   "target_update": target_update})
+# wandb.init(project="reinforcement-learning-coursework", name="dqn-pong",
+#            config={"batch size":batch_size, "learning_rate": learning_rate, "eps_min": eps_min,
+#                    "eps_decay": eps_decay,"capacity": capacity,
+#                    "target_update": target_update})
 
 env = make_env("PongDeterministic-v4")
 observation = env.reset()
@@ -404,7 +404,7 @@ for e in range(num_eps):
             loss = train_agent(policy_net, target_net, memory)
             avg_loss += loss
             history.step_loss.append(loss)
-            wandb.log({'loss': loss, 'eps': agent.epsilon}, step=agent.step_num)
+            # wandb.log({'loss': loss, 'eps': agent.epsilon}, step=agent.step_num)
 
         history.step_eps.append(agent.epsilon)
         agent.epsilon = agent.eps_decay ** agent.step_num if \
@@ -419,7 +419,7 @@ for e in range(num_eps):
     avg_losses.append(avg_loss / (t + 1))
     avg_score = np.mean(scores[-100:])
     x = [i + 1 for i in range(num_eps)]
-    wandb.log({'avg reward': avg_score},step=agent.step_num)
+    # wandb.log({'avg reward': avg_score},step=agent.step_num)
     # plotLearning(x, scores, step_eps)
 
     print("Episode: ", e + 1, " | Score: %.2f" % score, " | Average score: %.2f" % avg_score,
@@ -448,9 +448,9 @@ Rounds in Pong correspond to one of the players getting a score & reward of 1 an
 The running mean score per episode, over the trailing 100 episodes, at the point I stopped training was 2.5, i.e. the trained AI Agent would win each episode 21 points to 18.5.
 """
 
-save_name_done = 'checkpoints/' + model_name + "_done_" + str(datetime.datetime.now().strftime("%y%m%d-%H%M"))
-torch.save({
-    'policy_net': policy_net.state_dict(),
-    'target_net': target_net.state_dict(),
-    'optimiser': policy_net.optimiser.state_dict()
-}, save_name_done + '.pt')
+# save_name_done = 'checkpoints/' + model_name + "_done_" + str(datetime.datetime.now().strftime("%y%m%d-%H%M"))
+# torch.save({
+#     'policy_net': policy_net.state_dict(),
+#     'target_net': target_net.state_dict(),
+#     'optimiser': policy_net.optimiser.state_dict()
+# }, save_name_done + '.pt')
