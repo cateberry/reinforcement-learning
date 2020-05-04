@@ -448,6 +448,13 @@ Rounds in Pong correspond to one of the players getting a score & reward of 1 an
 The running mean score per episode, over the trailing 100 episodes, at the point I stopped training was 2.5, i.e. the trained AI Agent would win each episode 21 points to 18.5.
 """
 
+final_agent = agent.state_dict()
+final_policy_net = policy_net.state_dict()
+final_target_net = target_net.state_dict()
+final_history = history.state_dict()
+final_optimiser = optimiser.state_dict()
+final_memory = memory.state_dict()
+
 # save_name_done = 'checkpoints/' + model_name + "_done_" + str(datetime.datetime.now().strftime("%y%m%d-%H%M"))
 # torch.save({
 #     'policy_net': policy_net.state_dict(),
