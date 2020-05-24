@@ -52,8 +52,8 @@ class Preprocess(gym.ObservationWrapper):
         self.observation_space = gym.spaces.Box(low=0.0, high=255, shape=(84,84,1), dtype=env.observation_space.dtype)
 
     def observation(self, obs):
-        new_obs = obs.transpose((2, 0, 1))  # Reorder channels to CHW
-        new_obs = np.ascontiguousarray(obs, dtype=np.float32) / 255     # Normalise to [0,1]
+        new_obs = obs.transpose((2, 0, 1))                                 # Reorder channels to CHW format
+        new_obs = np.ascontiguousarray(obs, dtype=np.float32) / 255        # Normalise to [0,1] range
         new_obs = torch.from_numpy(new_obs)
 
         preprocess = transforms.Compose([transforms.ToPILImage(),
@@ -63,12 +63,12 @@ class Preprocess(gym.ObservationWrapper):
         new_obs = preprocess(obs).to(device)
         return new_obs
 
-# Stack previous 4 frames using OpenAI Gym wrapper
-# ADAPTED FROM: OpenAI Baselines https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
+
 class FrameStack(gym.Wrapper):
     def __init__(self, env, k):
         """
-        Stack k last frames using deque.
+        Stack k last frames using deque and OpenAI Gym wrapper.
+        ADAPTED FROM: OpenAI Baselines https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
         """
         gym.Wrapper.__init__(self, env)
         self.k = k
@@ -89,10 +89,12 @@ class FrameStack(gym.Wrapper):
         frames = np.concatenate([s.cpu() for s in self.frames], axis=0)
         frames = torch.from_numpy(frames)
         frames = frames.to(device)
-        return frames, reward, done, info               # return stack of 4 previous frames instead of just one frame (and other stuff)
+        return frames, reward, done, info               # return stack of 4 previous frames instead of just one frame
 
-# Apply classes for preprocessing and frame stacking to create environment
 def make_env(env_name):
+    """
+    Apply classes for preprocessing and frame stacking to create environment
+    """
     env = gym.make(env_name)
     env = Preprocess(env)
     env = FrameStack(env, 4)
@@ -101,23 +103,24 @@ def make_env(env_name):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")   # Uses GPU for training if available
 
 # Sample some frames to check preprocessing
-# env = make_env("PongDeterministic-v4")
-# observation = env.reset()
-#
-# for i in range(55):
-#     if i > 50:
-#         plt.imshow(observation.cpu().squeeze(0).permute(1, 2, 0).numpy()[:,:,1],cmap="gray")  # interpolation='none')
-#         plt.show()
-#
-#     observation, _, _, _ = env.step(random.randrange(6))
-#
-# print("Input shape: ", env.observation_space.shape)
-# print("Action space size: ", env.action_space.n)
-# print("Actions: ", env.get_action_meanings())
+env = make_env("PongDeterministic-v4")
+observation = env.reset()
+
+for i in range(55):
+    if i > 50:
+        plt.imshow(observation.cpu().squeeze(0).permute(1, 2, 0).numpy()[:,:,1],cmap="gray")  # interpolation='none')
+        plt.show()
+
+    observation, _, _, _ = env.step(random.randrange(6))
+
+print("Input shape: ", env.observation_space.shape)
+print("Action space size: ", env.action_space.n)
+print("Actions: ", env.get_action_meanings())
 
 # Check dimensions of observation are in correct order (batch size, channels (stack of 4 1 channel frames), height, width)
-#print(observation.shape)
+print(observation.shape)
 
+# Create Transition structure for storing transitions in replay memory
 Transition = namedtuple(
     'Transition', ['state', 'action', 'reward', 'next_state', 'terminal'])
 
@@ -159,6 +162,7 @@ class DDQN(nn.Module):
         self.input_dims = input_dims
         self.actions = n_actions
         self.lr = learning_rate
+        # Convolutional layers:
         self.conv1 = nn.Conv2d(4, 16, 8, stride=4)  # 4 input channels (4 frames of 1 channel images (greyscale))
         self.conv2 = nn.Conv2d(16, 32, 4, stride=2)
         #self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
@@ -171,8 +175,10 @@ class DDQN(nn.Module):
             s = x.shape
             fc1_size = s[1] * s[2] * s[3]
 
+        # Fully-connected layers:
         self.fc1 = nn.Linear(fc1_size, 256)
         self.fc2 = nn.Linear(256, self.actions)  # 6 possible actions
+        # Optimiser for gradient descent:
         self.optimiser = optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, x):
@@ -189,9 +195,8 @@ class DDQNAgent(object):
     """
     Double DQN agent object to store hyperparameter values and some values during training.
     """
-    def __init__(self, input_dims, n_actions=6, capacity=250000, lr=0.0001, gamma=0.99, epsilon=1,
-                 eps_min=0.1, eps_decay=1e-5, batch_size=32, target_update=1000):
-        # Defaults are parameters from DeepMind paper
+    def __init__(self, input_dims, n_actions=6, capacity=25000, lr=0.0001, gamma=0.99, epsilon=1.0,
+                 eps_min=0.02, eps_decay=0.99999, batch_size=32, target_update=500):
         # Size of state and action spaces
         self.state_shape = input_dims
         self.n_actions = n_actions
@@ -208,7 +213,7 @@ class DDQNAgent(object):
         self.target_update = target_update  # number of steps before updating the target network weights
         self.step_num = 0  # keep track of steps and eps to know when to update target network
         self.ep_steps = 0
-        self.loss = nn.SmoothL1Loss()
+        self.loss = nn.SmoothL1Loss()   # Huber loss
 
 class History():
     """
@@ -269,7 +274,7 @@ class History():
 
 def next_action(state, policy_net):
     """
-    Function to choose next action from state based on policy model.
+    Function to choose next action from state based on policy model following an epsilon-greedy policy
     """
     rd = random.random()
     if rd < agent.epsilon:  # explore
@@ -302,76 +307,77 @@ def train_agent(policy, target, memory):
     mask = torch.stack([torch.Tensor([0]) if t.terminal else torch.Tensor([1]) for t in transitions]).to(device)
 
     with torch.no_grad():   # Use target network to evaluate Q-values
-        q_next = target(next_states).max(1)[0].detach() # (32,1)
+        q_next = target(next_states).max(1)[0].detach() # Max Q-value of next state (32,1)
 
-    policy.optimiser.zero_grad()
+    policy.optimiser.zero_grad()    # Zero the optimiser gradients before updating
 
-    q_current = policy(states) # (32,6)
-    actions_onehot = F.one_hot(actions, agent.n_actions).squeeze(1).to(device) # (32,6)
-    q_current_acts = torch.sum(q_current * actions_onehot, -1).view(agent.batch_size,1) # (32,1)
-    q_targets = torch.zeros((agent.batch_size,1)).to(device) # (32,1)
-    q_targets = q_next * mask[:,0]   # non-terminal states take max next Q-value from target model
-    q_target = q_targets.view(agent.batch_size,1) * agent.gamma + rewards # (32,1) update target Q-values
+    q_current = policy(states) # Q-values for current state using policy model (32,6)
+    actions_onehot = F.one_hot(actions, agent.n_actions).squeeze(1).to(device) # Actions taken as one-hot vectore (32,6)
+    q_current_acts = torch.sum(q_current * actions_onehot, -1).view(agent.batch_size,1) # Q-values just for actions taken (32,1)
+    #q_targets = torch.zeros((agent.batch_size,1)).to(device) # (32,1)
+    q_targets = q_next * mask[:,0] # Non-terminal states take max next Q-value from target model, zero otherwise (32,1)
+    q_target = q_targets.view(agent.batch_size,1) * agent.gamma + rewards # Update target Q-values (32,1)
 
     # Perform a single gradient update just for batch in consideration
-    policy_net.train()
+    policy.train()
     loss_fn = agent.loss # Huber loss
-    loss = loss_fn(q_current_acts, q_target)    # loss between current Q-values for state/actions and target Q-values
-    loss.backward()  # backprop loss
-    policy.optimiser.step()  # perform gradient update
+    loss = loss_fn(q_current_acts, q_target) # Loss between current Q-values for state/actions and target Q-values
+    loss.backward()  # Backprop loss
+    policy.optimiser.step()  # Perform gradient update
 
     return loss.detach().item()
 
 # Hyperparameters
 batch_size = 32
-learning_rate = 0.0001 # 0.0001 (best)
+learning_rate = 0.0001
 gamma = 0.99
-eps_min = 0.02 # 0.02 (best)
+eps_min = 0.02
 eps_decay = 0.99999
-capacity = 25000 # 25000 (best)
-target_update = 1000 # 1000 (best)
+capacity = 25000
+target_update = 500
 num_eps = 400
-steps_before_train = 10 # don't start training right from beginning of epoch
+steps_before_train = 10 # Don't start training right from beginning of epoch
 
-# Config for wandb
-wandb.init(project="reinforcement-learning-coursework", name="ddqn-pong",
-           config={"batch size":batch_size, "learning_rate": learning_rate, "eps_min": eps_min,
-                   "eps_decay": eps_decay,"capacity": capacity,
-                   "target_update": target_update})
+# Config for wandb (API for tracking during training)
+# wandb.init(project="reinforcement-learning-coursework", name="ddqn-pong",
+#            config={"batch size":batch_size, "learning_rate": learning_rate, "eps_min": eps_min,
+#                    "eps_decay": eps_decay,"capacity": capacity,
+#                    "target_update": target_update})
 
-env = make_env("PongDeterministic-v4")
+env = make_env("PongDeterministic-v4")  # Use environment with frame-skipping and deterministic actions
 observation = env.reset()
 input_shape = np.array(observation.shape)
 n_actions = env.action_space.n
 
 agent = DDQNAgent(input_shape, n_actions, lr=learning_rate, capacity=capacity, gamma=gamma, eps_min=eps_min, eps_decay=eps_decay,
-                 batch_size=batch_size, target_update=target_update)  # other params default
+                 batch_size=batch_size, target_update=target_update)
+# Initialise DQNs, replay memory and history objects:
 policy_net = DDQN(input_shape, n_actions, learning_rate).to(device)
 target_net = DDQN(input_shape, n_actions, learning_rate).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 memory = ReplayMemory(capacity)
 history = History()
 
-# If loading checkpoint:
-# resume = False
-# model_name = 'DDQN' + '_40_200503-1956'# fill in file path for checkpoint
-# save_name = 'checkpoints/' + model_name
+# Loading checkpoint:
+resume = False
+model_name = 'DDQN' + '_40_200503-1956' # fill in file path for checkpoint
+save_name = 'checkpoints/' + model_name
 
-# if resume:
-#     with open(save_name + '.pickle', 'rb') as f:
-#         data = pickle.load(f)
-#         history = data['history']
-#         agent = data['agent']
-#         memory = data['memory']
-#     checkpoint = torch.load(save_name + '.pt')
-#     policy_net = DDQN(input_shape, n_actions, learning_rate).to(device)
-#     target_net = DDQN(input_shape, n_actions, learning_rate).to(device)
-#     policy_net.load_state_dict(checkpoint['policy_net'])
-#     target_net.load_state_dict(checkpoint['target_net'])
-#     policy_net.optimiser.load_state_dict(checkpoint['optimiser'])
+if resume:
+    with open(save_name + '.pickle', 'rb') as f:
+        data = pickle.load(f)
+        history = data['history']
+        agent = data['agent']
+        memory = data['memory']
+    checkpoint = torch.load(save_name + '.pt')
+    policy_net = DDQN(input_shape, n_actions, learning_rate).to(device)
+    target_net = DDQN(input_shape, n_actions, learning_rate).to(device)
+    policy_net.load_state_dict(checkpoint['policy_net'])
+    target_net.load_state_dict(checkpoint['target_net'])
+    policy_net.optimiser.load_state_dict(checkpoint['optimiser'])
 
-target_net.eval() # so that weights aren't updated
-scores, step_eps, avg_losses = [], [], []
+target_net.eval() # So that target network weights aren't updated
+scores, step_eps, avg_losses = [], [], [] # Store intermediate results
 
 # Training loop over specified number of epochs
 for e in range(num_eps):
@@ -383,11 +389,12 @@ for e in range(num_eps):
     # Take initial state as stack of first frame 4 times
     state = env.reset()
 
+    # Run epoch until one player reaches 21:
     for t in count():
         agent.step_num += 1
         agent.ep_steps += 1
         history.step_count += 1
-        # Take an action (epsilon hyperparameters are defined when creating agent)
+        # Take an action following epsilon-greedy policy:
         action = next_action(state, policy_net)
         next_state, reward, done, info = env.step(action)
         score += reward
@@ -402,9 +409,10 @@ for e in range(num_eps):
             loss = train_agent(policy_net, target_net, memory)
             avg_loss += loss
             history.step_loss.append(loss)
-            wandb.log({'loss': loss, 'eps': agent.epsilon}, step=agent.step_num)
+            # wandb.log({'loss': loss, 'eps': agent.epsilon}, step=agent.step_num)
 
         history.step_eps.append(agent.epsilon)
+        # Decay epsilon each step
         agent.epsilon = agent.eps_decay ** agent.step_num if \
          agent.epsilon > agent.eps_min else agent.eps_min
 
@@ -412,11 +420,11 @@ for e in range(num_eps):
             history.update(t, avg_loss)
             break
 
-    step_eps.append(agent.epsilon)  # save epsilon value of episode
+    step_eps.append(agent.epsilon)  # Save epsilon value of episode
     scores.append(score)
     avg_losses.append(avg_loss / (t + 1))
-    avg_score = np.mean(scores[-100:])
-    wandb.log({'avg reward': avg_score, 'steps per ep': agent.ep_steps}, step=agent.step_num)
+    avg_score = np.mean(scores[-100:])  # Sliding window average score
+    # wandb.log({'avg reward': avg_score, 'steps per ep': agent.ep_steps}, step=agent.step_num)
 
     print("Episode: ", e + 1, " | Score: %.2f" % score, " | Average score: %.2f" % avg_score,
           " | Episode Loss: %.6f" % avg_losses[-1],
@@ -434,7 +442,7 @@ for e in range(num_eps):
         }, save_name + '.pt')
 
         with open(save_name + '.pickle', 'wb') as f:
-            pickle.dump({'agent': agent, 'history': history, 'agent': agent},
+            pickle.dump({'agent': agent, 'history': history, 'memory': memory},
                         f, pickle.HIGHEST_PROTOCOL)
 
 # Save fina model after training is finished
