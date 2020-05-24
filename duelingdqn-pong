@@ -52,8 +52,8 @@ class Preprocess(gym.ObservationWrapper):
         self.observation_space = gym.spaces.Box(low=0.0, high=255, shape=(84,84,1), dtype=env.observation_space.dtype)
 
     def observation(self, obs):
-        new_obs = obs.transpose((2, 0, 1))  # Reorder channels to CHW
-        new_obs = np.ascontiguousarray(obs, dtype=np.float32) / 255     # Normalise to [0,1]
+        new_obs = obs.transpose((2, 0, 1))                                 # Reorder channels to CHW format
+        new_obs = np.ascontiguousarray(obs, dtype=np.float32) / 255        # Normalise to [0,1] range
         new_obs = torch.from_numpy(new_obs)
 
         preprocess = transforms.Compose([transforms.ToPILImage(),
@@ -63,12 +63,11 @@ class Preprocess(gym.ObservationWrapper):
         new_obs = preprocess(obs).to(device)
         return new_obs
 
-# Stack previous 4 frames using OpenAI Gym wrapper
-# ADAPTED FROM: OpenAI Baselines https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
 class FrameStack(gym.Wrapper):
     def __init__(self, env, k):
         """
-        Stack k last frames using deque.
+        Stack k last frames using deque and OpenAI Gym wrapper.
+        ADAPTED FROM: OpenAI Baselines https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
         """
         gym.Wrapper.__init__(self, env)
         self.k = k
@@ -89,10 +88,12 @@ class FrameStack(gym.Wrapper):
         frames = np.concatenate([s.cpu() for s in self.frames], axis=0)
         frames = torch.from_numpy(frames)
         frames = frames.to(device)
-        return frames, reward, done, info               # return stack of 4 previous frames instead of just one frame (and other stuff)
+        return frames, reward, done, info               # return stack of 4 previous frames instead of just one frame
 
-# Apply classes for preprocessing and frame stacking to create environment
 def make_env(env_name):
+    """
+    Apply classes for preprocessing and frame stacking to create environment
+    """
     env = gym.make(env_name)
     env = Preprocess(env)
     env = FrameStack(env, 4)
@@ -100,6 +101,7 @@ def make_env(env_name):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")   # Uses GPU for training if available
 
+# Create Transition structure for storing transitions in replay memory
 Transition = namedtuple(
     'Transition', ['state', 'action', 'reward', 'next_state', 'terminal'])
 
@@ -156,11 +158,10 @@ class DuelingDDQN(nn.Module):
         # State value approximator:
         self.V_fc1 = nn.Linear(fc1_size, 256)
         self.V_fc2 = nn.Linear(256, 1)  # Return a scalar
-
         # Action advantage approximator:
         self.A_fc1 = nn.Linear(fc1_size, 256)
         self.A_fc2 = nn.Linear(256, n_actions)  # Return a vector with value for each action
-
+        # Optimiser:
         self.optimiser = optim.Adam(self.parameters(), lr=self.lr)
 
     def forward(self, x):
@@ -184,9 +185,8 @@ class DDQNAgent(object):
     """
     Double DQN agent object to store hyperparameter values and some values during training.
     """
-    def __init__(self, input_dims, n_actions=6, capacity=250000, lr=0.0001, gamma=0.99, epsilon=1,
-                 eps_min=0.1, eps_decay=1e-5, batch_size=32, target_update=1000):
-        # Defaults are parameters from DeepMind paper
+    def __init__(self, input_dims, n_actions=6, capacity=25000, lr=0.0001, gamma=0.99, epsilon=1.0,
+                 eps_min=0.02, eps_decay=0.99999, batch_size=32, target_update=500):
         # Size of state and action spaces
         self.state_shape = input_dims
         self.n_actions = n_actions
@@ -203,7 +203,7 @@ class DDQNAgent(object):
         self.target_update = target_update  # number of steps before updating the target network weights
         self.step_num = 0  # keep track of steps and eps to know when to update target network
         self.ep_steps = 0
-        self.loss = nn.SmoothL1Loss()
+        self.loss = nn.SmoothL1Loss()   # Huber loss
 
 class History():
     """
@@ -264,7 +264,7 @@ class History():
 
 def next_action(state, policy_net):
     """
-    Function to choose next action from state based on policy model.
+    Function to choose next action from state based on policy model following an epsilon-greedy policy
     """
     rd = random.random()
     if rd < agent.epsilon:  # explore
@@ -304,12 +304,11 @@ def train_agent(policy, target, memory):
     q_current = policy(states) # (32,6)
     actions_onehot = F.one_hot(actions, agent.n_actions).squeeze(1).to(device) # (32,6)
     q_current_acts = torch.sum(q_current * actions_onehot, -1).view(agent.batch_size,1) # (32,1)
-    q_targets = torch.zeros((agent.batch_size,1)).to(device) # (32,1)
     q_targets = q_next * mask[:,0]   # non-terminal states take max next Q-value from target model
     q_target = q_targets.view(agent.batch_size,1) * agent.gamma + rewards # (32,1) update target Q-values
 
     # Perform a single gradient update just for batch in consideration
-    policy_net.train()
+    policy.train()
     loss_fn = agent.loss # Huber loss
     loss = loss_fn(q_current_acts, q_target)    # loss between current Q-values for state/actions and target Q-values
     loss.backward()  # backprop loss
@@ -327,7 +326,7 @@ gamma = 0.99
 eps_min = 0.02 # 0.02 (best)
 eps_decay = 0.99999
 capacity = 25000 # 25000 (best)
-target_update = 1000 # 1000 (best)
+target_update = 500 # 500 (best)
 num_eps = 400
 steps_before_train = 10 # don't start training right from beginning of epoch
 
@@ -432,7 +431,7 @@ for e in range(num_eps):
         }, save_name + '.pt')
 
         with open(save_name + '.pickle', 'wb') as f:
-            pickle.dump({'agent': agent, 'history': history, 'agent': agent},
+            pickle.dump({'agent': agent, 'history': history, 'memory': memory},
                         f, pickle.HIGHEST_PROTOCOL)
 
 # Save fina model after training is finished
